@@ -957,7 +957,9 @@ export function ModelSettingsModal({
                 className="mt-1"
               />
               <p className="text-xs text-muted-foreground mt-1">
-                Base URL of the OpenAI-compatible API
+                Base URL of the OpenAI-compatible API, ending in <code>/v1</code> (e.g.{' '}
+                <code>http://localhost:8000/v1</code>). The <code>/v1</code> is added
+                automatically if omitted.
               </p>
             </div>
 

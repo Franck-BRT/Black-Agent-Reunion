@@ -174,7 +174,7 @@ pub async fn generate_summary(
             let endpoint = custom_openai_endpoint
                 .ok_or_else(|| "Custom OpenAI endpoint not configured".to_string())?;
             (
-                format!("{}/chat/completions", endpoint.trim_end_matches('/')),
+                build_custom_openai_chat_url(endpoint),
                 header::HeaderMap::new(),
             )
         }
@@ -342,5 +342,74 @@ fn provider_name(provider: &LLMProvider) -> &str {
         LLMProvider::BuiltInAI => "Built-in AI",
         LLMProvider::OpenRouter => "OpenRouter",
         LLMProvider::CustomOpenAI => "Custom OpenAI",
+    }
+}
+
+/// Builds the chat-completions URL for an OpenAI-compatible custom endpoint.
+///
+/// OpenAI-compatible servers (LM Studio, llama.cpp server, mlx-openai-server, …) expose a
+/// base URL ending in `/v1`. Users configure the endpoint by hand, so we tolerate the common
+/// variants instead of failing with a 404 or a duplicated path segment:
+///
+/// | Input                              | Output                                |
+/// |------------------------------------|---------------------------------------|
+/// | `http://host:PORT`                 | `http://host:PORT/v1/chat/completions`|
+/// | `http://host:PORT/`                | `http://host:PORT/v1/chat/completions`|
+/// | `http://host:PORT/v1`              | `http://host:PORT/v1/chat/completions`|
+/// | `http://host:PORT/v1/`             | `http://host:PORT/v1/chat/completions`|
+/// | `http://host:PORT/v1/chat/completions` | unchanged                        |
+fn build_custom_openai_chat_url(endpoint: &str) -> String {
+    let base = endpoint.trim().trim_end_matches('/');
+
+    // Full chat-completions URL already provided → use as-is.
+    if base.ends_with("/chat/completions") {
+        return base.to_string();
+    }
+
+    // Ensure exactly one `/v1` version segment before appending the path.
+    if base.ends_with("/v1") {
+        format!("{}/chat/completions", base)
+    } else {
+        format!("{}/v1/chat/completions", base)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_custom_openai_chat_url;
+
+    const EXPECTED: &str = "http://localhost:8000/v1/chat/completions";
+
+    #[test]
+    fn appends_v1_when_missing() {
+        assert_eq!(build_custom_openai_chat_url("http://localhost:8000"), EXPECTED);
+    }
+
+    #[test]
+    fn handles_trailing_slash_without_v1() {
+        assert_eq!(build_custom_openai_chat_url("http://localhost:8000/"), EXPECTED);
+    }
+
+    #[test]
+    fn keeps_single_v1() {
+        assert_eq!(build_custom_openai_chat_url("http://localhost:8000/v1"), EXPECTED);
+    }
+
+    #[test]
+    fn handles_trailing_slash_with_v1() {
+        assert_eq!(build_custom_openai_chat_url("http://localhost:8000/v1/"), EXPECTED);
+    }
+
+    #[test]
+    fn accepts_full_chat_completions_url() {
+        assert_eq!(
+            build_custom_openai_chat_url("http://localhost:8000/v1/chat/completions"),
+            EXPECTED
+        );
+    }
+
+    #[test]
+    fn trims_surrounding_whitespace() {
+        assert_eq!(build_custom_openai_chat_url("  http://localhost:8000/v1  "), EXPECTED);
     }
 }
