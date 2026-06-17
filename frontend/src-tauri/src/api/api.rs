@@ -1288,8 +1288,9 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
         return Err("Endpoint must start with http:// or https://".to_string());
     }
 
-    // Build the URL - append /chat/completions to the base endpoint
-    let url = format!("{}/chat/completions", endpoint.trim_end_matches('/'));
+    // Normalize the URL the same way the real summary request does (tolerates missing/extra
+    // /v1 and full chat/completions URLs) so Test Connection matches actual behavior.
+    let url = crate::summary::llm_client::build_custom_openai_chat_url(&endpoint);
 
     // Create a minimal test request
     let test_request = serde_json::json!({

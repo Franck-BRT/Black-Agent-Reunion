@@ -358,7 +358,10 @@ fn provider_name(provider: &LLMProvider) -> &str {
 /// | `http://host:PORT/v1`              | `http://host:PORT/v1/chat/completions`|
 /// | `http://host:PORT/v1/`             | `http://host:PORT/v1/chat/completions`|
 /// | `http://host:PORT/v1/chat/completions` | unchanged                        |
-fn build_custom_openai_chat_url(endpoint: &str) -> String {
+///
+/// Shared with the "Test Connection" command (`api::api_test_custom_openai_connection`) so the
+/// reachability check and the real summary request resolve the endpoint identically.
+pub(crate) fn build_custom_openai_chat_url(endpoint: &str) -> String {
     let base = endpoint.trim().trim_end_matches('/');
 
     // Full chat-completions URL already provided → use as-is.
