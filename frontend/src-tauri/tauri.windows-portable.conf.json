@@ -2,10 +2,12 @@
     "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
     "bundle": {
         "createUpdaterArtifacts": false,
+        "targets": ["nsis"],
         "windows": {
             "signCommand": null,
             "webviewInstallMode": {
-                "type": "offlineInstaller"
+                "type": "fixedRuntime",
+                "path": "./WebView2Runtime/"
             },
             "nsis": {
                 "installMode": "currentUser"

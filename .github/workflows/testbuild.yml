@@ -169,26 +169,72 @@ jobs:
           path: frontend/src-tauri/binaries/ffmpeg-*
           key: ${{ runner.os }}-ffmpeg-${{ hashFiles('frontend/src-tauri/build.rs', 'frontend/src-tauri/build/ffmpeg.rs') }}
 
-      - name: Build Tauri app (unsigned, no-admin NSIS, CPU)
+      - name: Stage WebView2 fixed runtime (from runner's installed Edge WebView2)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bases = @(
+            "C:\Program Files (x86)\Microsoft\EdgeWebView\Application",
+            "$env:ProgramFiles\Microsoft\EdgeWebView\Application"
+          )
+          $base = $bases | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $base) { throw "WebView2 runtime not found on runner" }
+          $ver = Get-ChildItem $base -Directory | Where-Object { $_.Name -match '^\d' } | Sort-Object Name -Descending | Select-Object -First 1
+          Write-Host "Using WebView2 runtime: $($ver.FullName)"
+          $dst = "frontend/src-tauri/WebView2Runtime"
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+          Copy-Item -Path (Join-Path $ver.FullName '*') -Destination $dst -Recurse -Force
+          if (!(Test-Path "$dst\msedgewebview2.exe")) { throw "msedgewebview2.exe missing in staged runtime" }
+          Write-Host "Staged WebView2 fixed runtime OK"
+
+      - name: Build Tauri app (unsigned, fixedRuntime, CPU)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: frontend
-          # tauri.windows-portable.conf.json: per-user NSIS (no admin), offline
-          # WebView2 installer (works without preinstalled WebView2 / no internet),
-          # signing disabled, updater artifacts disabled. CPU build (no Vulkan).
+          # tauri.windows-portable.conf.json: NSIS per-user (no admin), WebView2
+          # fixedRuntime (embedded, zero-install, works offline / without preinstalled
+          # WebView2), signing + updater artifacts disabled. CPU build (no Vulkan).
           args: --target x86_64-pc-windows-msvc --config src-tauri/tauri.windows-portable.conf.json
 
       - name: List build artifacts
         shell: bash
         run: find target/x86_64-pc-windows-msvc/release/bundle -type f 2>/dev/null || true
 
-      - name: Upload NSIS installer (no-admin)
+      - name: Assemble zero-install portable (.zip)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $setup = Get-ChildItem "target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe" | Select-Object -First 1
+          if (-not $setup) { throw "NSIS installer not found" }
+          Write-Host "Installer: $($setup.FullName)"
+          # Silent per-user install (no admin, no prompts) → produces the exact app tree
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList "/S" -PassThru -Wait
+          Write-Host "Installer exit code: $($p.ExitCode)"
+          # Locate the installed app tree under LOCALAPPDATA
+          $installed = Get-ChildItem -Path $env:LOCALAPPDATA -Recurse -Filter meetily.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $installed) { throw "Could not locate installed meetily.exe under LOCALAPPDATA" }
+          $appDir = $installed.Directory.FullName
+          Write-Host "Installed app dir: $appDir"
+          Get-ChildItem $appDir | Format-Table Name,Length
+          # Drop the uninstaller (irrelevant for a portable copy)
+          Remove-Item (Join-Path $appDir 'uninstall.exe') -ErrorAction SilentlyContinue
+          # Sanity: the fixed WebView2 runtime must be embedded in the portable tree
+          $hasWv = Get-ChildItem -Path $appDir -Recurse -Filter msedgewebview2.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $hasWv) { Write-Warning "msedgewebview2.exe NOT found in portable tree — WebView2 may not be embedded" } else { Write-Host "WebView2 runtime embedded at: $($hasWv.FullName)" }
+          $ver = "${{ steps.get-version.outputs.version }}"
+          $zip = "meetily-$ver-windows-x64-portable.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path (Join-Path $appDir '*') -DestinationPath $zip -Force
+          Get-Item $zip | Select-Object Name,Length
+
+      - name: Upload portable .zip + NSIS installer
         uses: actions/upload-artifact@v4
         with:
-          name: meetily-windows-x64-testbuild-${{ steps.get-version.outputs.version }}
+          name: meetily-windows-x64-portable-${{ steps.get-version.outputs.version }}
           path: |
+            meetily-*-windows-x64-portable.zip
             target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
           if-no-files-found: error
           retention-days: 14
