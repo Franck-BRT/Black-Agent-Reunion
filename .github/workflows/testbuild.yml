@@ -109,3 +109,86 @@ jobs:
             target/aarch64-apple-darwin/release/bundle/macos/*.app
           if-no-files-found: error
           retention-days: 14
+
+  testbuild-windows:
+    name: Test Build Windows (x64, unsigned, no-admin NSIS)
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version from tauri.conf.json
+        id: get-version
+        shell: bash
+        run: |
+          VERSION=$(grep -o '"version": "[^"]*"' frontend/src-tauri/tauri.conf.json | cut -d'"' -f4)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 8
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          key: windows-latest-x86_64-pc-windows-msvc
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          pnpm install
+
+      - name: Build llama-helper sidecar (CPU)
+        shell: bash
+        run: |
+          cargo build --release -p llama-helper
+          mkdir -p frontend/src-tauri/binaries
+          cp target/release/llama-helper.exe frontend/src-tauri/binaries/llama-helper-x86_64-pc-windows-msvc.exe
+          ls -la frontend/src-tauri/binaries/
+
+      - name: Cache FFmpeg binary
+        uses: actions/cache@v4
+        with:
+          path: frontend/src-tauri/binaries/ffmpeg-*
+          key: ${{ runner.os }}-ffmpeg-${{ hashFiles('frontend/src-tauri/build.rs', 'frontend/src-tauri/build/ffmpeg.rs') }}
+
+      - name: Build Tauri app (unsigned, no-admin NSIS, CPU)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: frontend
+          # tauri.windows-portable.conf.json: per-user NSIS (no admin), offline
+          # WebView2 installer (works without preinstalled WebView2 / no internet),
+          # signing disabled, updater artifacts disabled. CPU build (no Vulkan).
+          args: --target x86_64-pc-windows-msvc --config src-tauri/tauri.windows-portable.conf.json
+
+      - name: List build artifacts
+        shell: bash
+        run: find target/x86_64-pc-windows-msvc/release/bundle -type f 2>/dev/null || true
+
+      - name: Upload NSIS installer (no-admin)
+        uses: actions/upload-artifact@v4
+        with:
+          name: meetily-windows-x64-testbuild-${{ steps.get-version.outputs.version }}
+          path: |
+            target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 14

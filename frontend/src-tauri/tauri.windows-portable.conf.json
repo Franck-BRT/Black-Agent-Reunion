@@ -1,0 +1,15 @@
+{
+    "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+    "bundle": {
+        "createUpdaterArtifacts": false,
+        "windows": {
+            "signCommand": null,
+            "webviewInstallMode": {
+                "type": "offlineInstaller"
+            },
+            "nsis": {
+                "installMode": "currentUser"
+            }
+        }
+    }
+}
